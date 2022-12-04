@@ -43,17 +43,13 @@ def read_frame(que, video_reader, max_seq_len, window_size, test_pipeline, devic
             data['lq'] = [np.flip(frame, axis=2) for frame in frames]
             data = test_pipeline(data)
             data = data['lq'].unsqueeze(0)
+            data = pad_sequence(data, window_size)
+            data = data[:, 0: window_size]
             if data.shape[1] == window_size:
-                data = pad_sequence(data, window_size)
-                data = data[:, 0: window_size]
                 list.append(data)
-                if i != 0 and len(list) == batch_size:
-                    que.put(torch.cat(list).to(device))
+                if len(list) == batch_size:
+                    que.put(torch.cat(list))
                     list = []
-            else:
-                que.put(torch.cat(list).to(device))
-                list = [data]
-                que.put(torch.cat(list).to(device))
     else:  # recurrent framework
         for i in range(0, frame_count, max_seq_len):
             data = dict(lq=[], lq_path=None, key="")
@@ -63,13 +59,15 @@ def read_frame(que, video_reader, max_seq_len, window_size, test_pipeline, devic
             data = data['lq'].unsqueeze(0)
             if data.shape[1] == max_seq_len:
                 list.append(data)
-                if i != 0 and len(list) == batch_size:
-                    que.put(torch.cat(list).to(device))
+                if len(list) == batch_size:
+                    que.put(torch.cat(list))
                     list = []
             else:
-                que.put(torch.cat(list).to(device))
-                list = [data]
-                que.put(torch.cat(list).to(device))
+                if len(list) > 0:
+                    que.put(torch.cat(list))
+                que.put(data)
+    if len(list) > 0:
+        que.put(torch.cat(list))
 
 def write_frame(que, video_writer, f, min_max, window_size):
     while not que.empty() or f():
@@ -156,7 +154,7 @@ def main():
                 len += 1
         for i in tqdm(range(0, len)):
             data = read_frame_que.get()
-            data = model(lq=data, test_mode=True)['output']
+            data = model(lq=data.to(device), test_mode=True)['output']
             write_frame_que.put(data)
 
     t_write_frame_f = False
